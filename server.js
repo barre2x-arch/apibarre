@@ -1,84 +1,140 @@
 import express from "express";
-import pg from "pg";
-import cors from "cors";
+import pkg from "pg";
 import dotenv from "dotenv";
+import cors from "cors";
 
 dotenv.config();
 
+const { Pool } = pkg;
+
 const app = express();
-app.use(cors());
 app.use(express.json());
+app.use(cors());
 
-const client = new pg.Client({
-    connectionString: process.env.DATABASE_URL,
-    ssl: { rejectUnauthorized: false }
+// Conexão PostgreSQL
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false }
 });
 
-client.connect();
+// ===============================
+// AUTO CRIAR TABELAS AO INICIAR
+// ===============================
+async function createTables() {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS bans (
+        id SERIAL PRIMARY KEY,
+        userid TEXT,
+        motivo TEXT
+      );
 
-// Criar tabela automaticamente
-await client.query(`
-CREATE TABLE IF NOT EXISTS users (
-    id SERIAL PRIMARY KEY,
-    username TEXT,
-    invite TEXT,
-    banned BOOLEAN DEFAULT false
-)
-`);
+      CREATE TABLE IF NOT EXISTS invites (
+        id SERIAL PRIMARY KEY,
+        invite TEXT
+      );
 
-// 1️⃣ Registrar usuário
-app.post("/register", async (req, res) => {
-    const { username, invite } = req.body;
+      CREATE TABLE IF NOT EXISTS users (
+        id SERIAL PRIMARY KEY,
+        userid TEXT,
+        invite TEXT
+      );
+    `);
 
-    await client.query(
-        "INSERT INTO users (username, invite, banned) VALUES ($1, $2, false)",
-        [username, invite]
+    console.log("✔ Tabelas verificadas/criadas com sucesso.");
+  } catch (err) {
+    console.error("Erro ao criar tabelas:", err);
+  }
+}
+
+createTables(); // Chama ao iniciar
+
+// ===========================
+// ROTAS BANIDOS
+// ===========================
+
+// Adicionar banido
+app.post("/ban/add", async (req, res) => {
+  const { userid, motivo } = req.body;
+
+  try {
+    await pool.query(
+      "INSERT INTO bans (userid, motivo) VALUES ($1, $2)",
+      [userid, motivo]
     );
-
     res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// 2️⃣ Verificar ban
-app.get("/checkban/:username", async (req, res) => {
-    const { username } = req.params;
-
-    const result = await client.query(
-        "SELECT banned FROM users WHERE username = $1",
-        [username]
-    );
-
-    if (result.rows.length === 0) {
-        return res.json({ exists: false });
-    }
-
-    res.json({
-        exists: true,
-        banned: result.rows[0].banned
-    });
-});
-
-// 3️⃣ Banir usuário manualmente
-app.post("/ban", async (req, res) => {
-    const { username } = req.body;
-
-    await client.query(
-        "UPDATE users SET banned = true WHERE username = $1",
-        [username]
-    );
-
-    res.json({ success: true });
-});
-
-// 4️⃣ Listar usuários
-app.get("/users", async (req, res) => {
-    const result = await client.query("SELECT * FROM users");
+// Listar banidos
+app.get("/ban/list", async (req, res) => {
+  try {
+    const result = await pool.query("SELECT * FROM bans");
     res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-app.get("/", (req, res) => {
-    res.send("API BARRE funcionando.");
+// ===========================
+// ROTAS INVITES
+// ===========================
+
+// Adicionar invite
+app.post("/invite/add", async (req, res) => {
+  const { invite } = req.body;
+
+  try {
+    await pool.query("INSERT INTO invites (invite) VALUES ($1)", [invite]);
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log("Rodando na porta " + PORT));
+// Listar invites
+app.get("/invite/list", async (req, res) => {
+  try {
+    const result = await pool.query("SELECT * FROM invites");
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
+// ===========================
+// ROTAS USERS
+// ===========================
+
+// Adicionar usuário
+app.post("/users/add", async (req, res) => {
+  const { userid, invite } = req.body;
+
+  try {
+    await pool.query(
+      "INSERT INTO users (userid, invite) VALUES ($1, $2)",
+      [userid, invite]
+    );
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Listar usuários
+app.get("/users/list", async (req, res) => {
+  try {
+    const result = await pool.query("SELECT * FROM users");
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ===========================
+// START SERVER
+// ===========================
+const PORT = process.env.PORT || 10000;
+app.listen(PORT, () => console.log(`API rodando na porta ${PORT}`));
